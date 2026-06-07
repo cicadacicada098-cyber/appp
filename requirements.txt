@@ -1,5 +1,0 @@
-streamlit
-requests
-shelve
-folium
-streamlit-folium
